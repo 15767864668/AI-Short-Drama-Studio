@@ -484,6 +484,19 @@ function requestBodyForProvider(
   prompt: string,
   extra?: Record<string, unknown>
 ): Record<string, unknown> {
+  // MiniMax V2 video generation expects multimodal content, not a top-level prompt.
+  // Limit this adaptation to the official V2 endpoint so other custom providers stay unchanged.
+  if (kind === 'video' && /^https?:\/\/api\.minimax\.(cn|io)(?:\/|$)/i.test(baseUrl) &&
+      /\/v2\/video_generation\/?$/i.test(adapter?.path || '')) {
+    const source = { ...(extra || {}) }
+    delete source.prompt
+    const suppliedContent = source.content
+    delete source.content
+    const content = Array.isArray(suppliedContent) && suppliedContent.length
+      ? suppliedContent
+      : [{ type: 'text', text: prompt }]
+    return { ...source, model, content }
+  }
   if (!usesApimartProtocol(baseUrl, adapter)) {
     return { model, prompt, ...(extra || {}) }
   }
