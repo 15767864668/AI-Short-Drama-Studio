@@ -1137,6 +1137,10 @@ async function realHttpCustomVideo(
       ...(images.length ? { images } : {}),
       ...(lastFrame ? { last_frame: lastFrame } : {}),
       duration: input.duration,
+      ...( /^https?:\/\/api\.minimax\.(cn|io)(?:\/|$)/i.test(cfg.baseUrl) &&
+            /\/v2\/video_generation\/?$/i.test(cfg.adapter?.path || '')
+        ? { resolution: input.videoResolution }
+        : {}),
       aspect_ratio: input.aspectRatio && String(input.aspectRatio) !== 'auto' ? input.aspectRatio : '16:9',
       width: input.width,
       height: input.height,

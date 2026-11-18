@@ -470,6 +470,28 @@ function apimartAdapterDefaults(
   }
 }
 
+/** Official MiniMax H3 V2 uses a dedicated task query endpoint and response envelope. */
+function isMiniMaxV2VideoEndpoint(baseUrl: string, path?: string): boolean {
+  return /^https?:\/\/api\.minimax\.(cn|io)(?:\/|$)/i.test(baseUrl) &&
+    /\/v2\/video_generation\/?$/i.test(path || '')
+}
+
+function miniMaxV2AdapterDefaults(
+  baseUrl: string,
+  adapter: AdapterConfig,
+  kind: 'image' | 'video'
+): AdapterConfig {
+  if (kind !== 'video' || !isMiniMaxV2VideoEndpoint(baseUrl, adapter.path)) return adapter
+  return {
+    ...adapter,
+    pollPath: '/v2/query/video_generation/{id}',
+    pollUrl: '/v2/query/video_generation/{id}',
+    taskIdJsonPath: 'task_id',
+    pollJsonPath: 'task.status',
+    resultJsonPath: 'task.content.url'
+  }
+}
+
 function stringList(value: unknown): string[] {
   if (typeof value === 'string' && value.trim()) return [value.trim()]
   if (!Array.isArray(value)) return []
@@ -484,18 +506,46 @@ function requestBodyForProvider(
   prompt: string,
   extra?: Record<string, unknown>
 ): Record<string, unknown> {
-  // MiniMax V2 video generation expects multimodal content, not a top-level prompt.
-  // Limit this adaptation to the official V2 endpoint so other custom providers stay unchanged.
-  if (kind === 'video' && /^https?:\/\/api\.minimax\.(cn|io)(?:\/|$)/i.test(baseUrl) &&
-      /\/v2\/video_generation\/?$/i.test(adapter?.path || '')) {
-    const source = { ...(extra || {}) }
-    delete source.prompt
+  // MiniMax H3 V2 requires model/content/resolution/duration/ratio.
+  // Legacy fields such as prompt, aspect_ratio, width, height and audio must not be forwarded.
+  if (kind === 'video' && isMiniMaxV2VideoEndpoint(baseUrl, adapter?.path)) {
+    const source = extra || {}
     const suppliedContent = source.content
-    delete source.content
+    const images = stringList(source.images)
+    const firstImage = images.length ? images[0] : stringList(source.image)[0]
+    const lastImage = stringList(source.last_frame)[0]
+    if (images.length > 1 && lastImage) {
+      throw new Error('[video] MiniMax H3 不能同时使用多张参考图和首尾帧模式，请选择一种方式')
+    }
     const content = Array.isArray(suppliedContent) && suppliedContent.length
       ? suppliedContent
-      : [{ type: 'text', text: prompt }]
-    return { ...source, model, content }
+      : [
+          { type: 'text', text: prompt },
+          ...(images.length > 1
+            ? images.map((url) => ({
+                type: 'image_url', image_url: { url }, role: 'reference_image'
+              }))
+            : firstImage
+              ? [{ type: 'image_url', image_url: { url: firstImage }, role: 'first_frame' }]
+              : []),
+          ...(lastImage
+            ? [{ type: 'image_url', image_url: { url: lastImage }, role: 'last_frame' }]
+            : [])
+        ]
+    // AutoDL H3 workflow identifiers are not official MiniMax model IDs.
+    const officialModel = /^minimax[._-]h3[_-]/i.test(model) ? 'MiniMax-H3' : model
+    const rawResolution = String(source.resolution || '').trim().toUpperCase()
+    const resolution = rawResolution === '2K' && officialModel === 'MiniMax-H3' ? '2K' : '768P'
+    const rawDuration = Number(source.duration)
+    const duration = Number.isFinite(rawDuration) && rawDuration > 0
+      ? Math.min(15, Math.max(4, Math.round(rawDuration)))
+      : 5
+    const hasMedia = content.some((item: any) => item && item.type !== 'text')
+    const requestedRatio = String(source.ratio || source.aspect_ratio || '').trim()
+    const supportedRatios = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16']
+    const ratio = hasMedia ? 'adaptive'
+      : supportedRatios.includes(requestedRatio) ? requestedRatio : '16:9'
+    return { model: officialModel, content, resolution, duration, ratio }
   }
   if (!usesApimartProtocol(baseUrl, adapter)) {
     return { model, prompt, ...(extra || {}) }
@@ -547,7 +597,7 @@ export async function httpCustomMediaGenerate(opts: {
   onProgress?: (msg: string) => void
 }): Promise<{ blob: Blob; mimeType: string }> {
   const kind = opts.kind || 'image'
-  const adapter = apimartAdapterDefaults(opts.baseUrl, opts.adapter, kind)
+  const adapter = miniMaxV2AdapterDefaults(opts.baseUrl, apimartAdapterDefaults(opts.baseUrl, opts.adapter, kind), kind)
   const fallbackMime = kind === 'video' ? 'video/mp4' : 'image/png'
   const path = adapter.path || (kind === 'video' ? '/v1/videos/generations' : '/images/generations')
   const url = joinUrl(opts.baseUrl, path)
