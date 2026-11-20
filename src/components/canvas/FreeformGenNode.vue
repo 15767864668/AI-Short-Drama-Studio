@@ -205,6 +205,31 @@ function pickDuration(n: number) {
   duration.value = n
   durOpen.value = ''
 }
+/** Quick talking-character workflow for image-to-video nodes.
+ * Keeps the user's dialogue in the prompt, compatible with the existing H3 pipeline.
+ * Precise audio-driven lip-sync requires a separately configured compatible workflow.
+ */
+const talkingPanelOpen = ref(false)
+const talkingDialogue = ref('')
+const talkingVoice = ref('活泼、清晰的中文声音')
+function applyTalkingDialogue() {
+  const dialogue = talkingDialogue.value.trim()
+  if (!dialogue) {
+    toast.warn('请先输入角色台词')
+    return
+  }
+  const voice = talkingVoice.value.trim() || '自然清晰的声音'
+  prompt.value = [
+    '角色说话镜头：使用所选参考图中的角色，保持外形、颜色、背景和角色身份一致。',
+    '角色面向镜头自然说话，嘴部或鸟喙随台词发音自然开合，表情生动，头部轻微运动。',
+    `角色声音：${voice}。角色台词（逐字说出，不要改写）：“${dialogue}”`,
+    '镜头稳定，声音清晰，尽量同步口型与发音，不要字幕，不要额外角色。'
+  ].join('\\n')
+  if (showVideoAudio.value) generateAudio.value = true
+  talkingPanelOpen.value = false
+  toast.success('已填入角色说话提示词；请确认模型支持语音生成后点击出视频')
+}
+
 const genLabel = computed(() => (hasAsset.value ? '重绘' : isVideo.value ? '出视频' : '出图'))
 const failMsg = computed(() =>
   node.value?.status === 'failed' ? node.value.error || '生成失败' : ''
@@ -686,6 +711,17 @@ function removeSelf() {
             {{ optimizingPrompt ? '优化中…' : '优化提示词' }}
           </button>
         </div>
+        <div v-if="isVideo" class="talking-helper">
+          <button type="button" class="opt" @click="talkingPanelOpen = !talkingPanelOpen">
+            {{ talkingPanelOpen ? '收起角色说话' : '角色说话 / 台词' }}
+          </button>
+          <div v-if="talkingPanelOpen" class="talking-helper-panel">
+            <textarea v-model="talkingDialogue" rows="2" placeholder="输入台词，例如：大家好，我是一只会说话的小鸟！" />
+            <input v-model="talkingVoice" placeholder="音色，例如：活泼、清晰的中文声音" />
+            <button type="button" class="opt" @click="applyTalkingDialogue">应用到视频提示词</button>
+            <small>此功能生成带台词的视频提示词。是否有声音及口型同步取决于所选视频模型；不等于音频驱动的精确 Lip Sync。</small>
+          </div>
+        </div>
         <textarea
           v-model="prompt"
           rows="6"
@@ -768,6 +804,10 @@ function removeSelf() {
 </template>
 
 <style scoped>
+.talking-helper { display:flex; flex-direction:column; gap:8px; margin:8px 0; }
+.talking-helper-panel { display:flex; flex-direction:column; gap:8px; }
+.talking-helper-panel textarea, .talking-helper-panel input { width:100%; box-sizing:border-box; border:1px solid #454551; border-radius:8px; background:#202027; color:#f5f5f7; padding:8px; font:inherit; }
+.talking-helper-panel small { color:#a9a9b5; line-height:1.5; }
 .fnode {
   position: relative;
   width: 240px;
