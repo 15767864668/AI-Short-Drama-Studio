@@ -8,6 +8,7 @@ import { isNodeRunning } from '@/services/canvas/jobs'
 import { friendlyAiError, shouldToastAiError } from '@/services/ai/abort'
 import { cssAspectRatio } from '@/services/canvas/layout'
 import { generateSpeech, TTS_VOICES } from '@/services/ai/tts'
+import { generateVideo } from '@/services/ai/video'
 import { toSRT } from '@/services/ffmpeg/subtitle'
 import { openLightbox } from '@/composables/useLightbox'
 import NodeBusyOverlay from '@/components/canvas/NodeBusyOverlay.vue'
@@ -222,6 +223,8 @@ const talkingSpeechBlob = ref<Blob | null>(null)
 const talkingSpeechDuration = ref(0)
 const talkingSpeechMime = ref('audio/wav')
 const talkingSpeechText = ref('')
+const talkingLipBusy = ref(false)
+const talkingLipProgress = ref('')
 function saveTalkingFile(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -247,6 +250,45 @@ async function synthesizeTalkingSpeech() {
   } catch (error) {
     toast.error(error instanceof Error ? error.message : String(error))
   } finally { talkingBusy.value = false }
+}
+async function generateTalkingLipSync() {
+  if (talkingLipBusy.value) return
+  if (!talkingSpeechBlob.value || talkingSpeechText.value !== talkingDialogue.value.trim()) {
+    toast.warn('请先用当前台词生成配音')
+    return
+  }
+  const imageId = refs.value[0]
+  if (!imageId) { toast.warn('请先在视频节点添加一张角色参考图'); return }
+  const imageBlob = await assets.getBlob(imageId)
+  if (!imageBlob) { toast.error('无法读取角色参考图'); return }
+  talkingLipBusy.value = true
+  talkingLipProgress.value = '准备数字人口型同步工作流…'
+  try {
+    const result = await generateVideo({
+      imageBlob,
+      audioBlob: talkingSpeechBlob.value,
+      audioSync: true,
+      prompt: talkingDialogue.value.trim(),
+      duration: Math.max(5, Math.min(15, talkingSpeechDuration.value || 5)),
+      width: 768,
+      height: 1360,
+      aspectRatio: '9:16',
+      videoModel: 'h3',
+      videoProfileId: node.value?.data.videoProfileId
+    }, message => { talkingLipProgress.value = message })
+    const asset = await assets.add(result.blob, 'video', 'generated', {
+      filename: '角色口型同步.mp4',
+      projectId: project.current?.id
+    })
+    updateNodeData(props.id, { ...node.value?.data, outputAssetId: asset.id, nodeType: 'videoGen' })
+    await loadMedia()
+    toast.success('口型同步视频已生成；动物口型效果取决于工作流模型')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : String(error), 10000)
+  } finally {
+    talkingLipBusy.value = false
+    talkingLipProgress.value = ''
+  }
 }
 function exportTalkingSrt() {
   const dialogue = talkingDialogue.value.trim()
@@ -780,10 +822,12 @@ function removeSelf() {
             <button type="button" class="opt" :disabled="talkingBusy" @click="synthesizeTalkingSpeech">{{ talkingBusy ? '配音生成中…' : '生成 AI 配音' }}</button>
             <audio v-if="talkingSpeechUrl" :src="talkingSpeechUrl" controls class="talking-player" />
             <button v-if="talkingSpeechBlob" type="button" class="opt" @click="saveTalkingFile(talkingSpeechBlob!, talkingSpeechMime.includes('mpeg') ? '角色配音.mp3' : talkingSpeechMime.includes('ogg') ? '角色配音.ogg' : '角色配音.wav')">下载配音</button>
+            <button v-if="talkingSpeechBlob" type="button" class="opt" :disabled="talkingLipBusy || generating" @click="generateTalkingLipSync">{{ talkingLipBusy ? '正在同步口型…' : '生成音频驱动口型视频（需 AutoDL 数字人工作流）' }}</button>
+            <small v-if="talkingLipProgress">{{ talkingLipProgress }}</small>
             <label class="talking-caption"><input v-model="talkingSubtitleEnabled" type="checkbox" /> 生成字幕文件（SRT）</label>
             <button v-if="talkingSubtitleEnabled" type="button" class="opt" @click="exportTalkingSrt">导出 SRT 字幕</button>
             <button type="button" class="opt" @click="applyTalkingDialogue">应用到视频提示词</button>
-            <small>配音使用已配置的 TTS 接口；SRT 时间为估算值。音频驱动口型和字幕烧录尚未接入此节点，不能保证 H3 自动对口型或自动显示字幕。</small>
+            <small>配音使用已配置的 TTS 接口；SRT 时间为估算值。口型同步需要 AutoDL 数字人工作流，动物口型效果不保证；字幕烧录尚未接入此节点，不能保证 H3 自动对口型或自动显示字幕。</small>
           </div>
         </div>
         <textarea
