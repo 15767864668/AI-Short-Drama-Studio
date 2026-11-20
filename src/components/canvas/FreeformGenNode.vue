@@ -224,7 +224,7 @@ function applyTalkingDialogue() {
     '角色面向镜头自然说话，嘴部或鸟喙随台词发音自然开合，表情生动，头部轻微运动。',
     `角色声音：${voice}。角色台词（逐字说出，不要改写）：“${dialogue}”`,
     '镜头稳定，声音清晰，尽量同步口型与发音，不要字幕，不要额外角色。'
-  ].join('\\n')
+  ].join('\n')
   if (showVideoAudio.value) generateAudio.value = true
   talkingPanelOpen.value = false
   toast.success('已填入角色说话提示词；请确认模型支持语音生成后点击出视频')
