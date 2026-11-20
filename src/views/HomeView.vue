@@ -421,8 +421,8 @@ async function moveSelectedLibrary() {
       <button type="button" class="brand" @click="nav = 'home'">
         <img class="brand-mark" src="/logo.png" alt="" />
         <span>
-          <strong>剧流 Studio</strong>
-          <em>AI 短剧工作台</em>
+          <strong>Hello Simple</strong>
+          <em>AI 工作台</em>
         </span>
       </button>
       <nav class="side-links" aria-label="首页导航">
@@ -451,13 +451,6 @@ async function moveSelectedLibrary() {
           <HomeIcon name="script" :size="18" /> 视频教程 ↗
         </a>
       </nav>
-      <div class="side-foot">
-        <div class="side-kicker">开源，免费</div>
-        <a href="https://github.com/JerrIsTheBesta/AI-Short-Drama-Studio" target="_blank" rel="noreferrer">
-          <HomeIcon name="github" :size="15" />
-          去 GitHub →
-        </a>
-      </div>
     </aside>
 
     <div class="stage">
@@ -474,7 +467,6 @@ async function moveSelectedLibrary() {
         <section class="banner">
           <div class="banner-stars" aria-hidden="true"></div>
           <div class="banner-copy">
-            <h1>用 AI，轻松创作<br /><span>属于你的短剧世界</span></h1>
             <p>一站式 AI 短剧创作平台，支持图文、视频、数字人、智能剪辑与多种生成能力</p>
             <div class="banner-actions">
               <button type="button" class="go" :disabled="creating" @click="quickCreate">开始创作 →</button>
