@@ -15,7 +15,8 @@ import { generateMockImage } from './mock'
 import {
   httpCustomImageGenerate,
   comfyPromptGenerate,
-  resolveImageAdapter
+  resolveImageAdapter,
+  providerHttp
 } from './adapters'
 import { apimartGenerateImage, isRelayImageEndpoint } from './apimart'
 import { autodlRequest } from './video'
@@ -387,14 +388,17 @@ async function realMiniMaxImage(input: ImageGenInput): Promise<ImageGenOutput> {
   const size = miniMaxImageSize(input.aspectRatio, input.width, input.height)
   const url = `${baseUrl.replace(/\/+$/, '')}/images/generations`
   log(`→ MiniMax H3-Image · ${model} · ${size}`)
-  const resp = await fetch(url, {
+  // Use the existing Electron main-process transport to avoid renderer CORS failures.
+  // In browser-only mode providerHttp falls back to fetch.
+  const resp = await providerHttp(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`
     },
     body: JSON.stringify({ model, prompt, size, n: input.n ?? 1 }),
-    signal: input.signal
+    signal: input.signal,
+    timeoutMs: 120_000
   })
   if (!resp.ok) throw new Error(`[image] MiniMax 出图失败 ${resp.status} ${await resp.text()}`)
   const data = await resp.json()
