@@ -8,6 +8,7 @@
  */
 
 import { getAIMode } from './client'
+import { providerHttp } from './adapters'
 import { spokenTextOnly } from './dialogue'
 import { getTtsConfig } from './runtime'
 
@@ -169,17 +170,17 @@ function languageHint(language: string): string | undefined {
 }
 
 async function downloadAudioUrl(audioUrl: string, signal?: AbortSignal): Promise<Blob> {
-  const aResp = await fetch(audioUrl, { signal })
+  const aResp = await providerHttp(audioUrl, { signal, timeoutMs: 180_000 })
   if (!aResp.ok) throw new Error(`[TTS] 下载音频失败 ${aResp.status}`)
-  const buf = await aResp.arrayBuffer()
-  const ct = (aResp.headers.get('content-type') || '').toLowerCase()
+  const downloaded = await aResp.blob()
+  const ct = (downloaded.type || '').toLowerCase()
   const mime =
     ct.includes('mpeg') || ct.includes('mp3')
       ? 'audio/mpeg'
       : ct.includes('wav')
         ? 'audio/wav'
         : 'audio/mpeg'
-  return new Blob([buf], { type: mime })
+  return new Blob([downloaded], { type: mime })
 }
 
 function blobFromBase64(data: string, mime = 'audio/wav'): Blob {
@@ -214,7 +215,7 @@ async function speechSynthesizer(
   if (hint) input.language_hints = [hint]
   if (instruction) input.instruction = instruction
 
-  const resp = await fetch(`${apiRoot}/services/audio/tts/SpeechSynthesizer`, {
+  const resp = await providerHttp(`${apiRoot}/services/audio/tts/SpeechSynthesizer`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -258,7 +259,7 @@ async function nativeQwen3Speech(
   signal?: AbortSignal
 ): Promise<Blob> {
   const apiRoot = origin.replace(/\/api\/v1$/i, '') + '/api/v1'
-  const resp = await fetch(`${apiRoot}/services/aigc/multimodal-generation/generation`, {
+  const resp = await providerHttp(`${apiRoot}/services/aigc/multimodal-generation/generation`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
