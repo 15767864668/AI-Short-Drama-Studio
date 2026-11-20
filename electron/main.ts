@@ -848,7 +848,7 @@ app.whenReady().then(async () => {
       if (/ERR_CERT_DATE_INVALID|ERR_CERT_AUTHORITY_INVALID|ERR_CERT_COMMON_NAME_INVALID|ERR_CERT_INVALID/i.test(message)) {
         const host = parsed.hostname
         console.error('[provider-http] TLS certificate verification failed', { host, code: message })
-        if (parsed.protocol === 'https:' && /^(api\\.minimaxi\\.com|api\\.minimax\\.io)$/i.test(host) && /ERR_CERT_DATE_INVALID/i.test(message)) {
+        if (parsed.protocol === 'https:' && /^(api\.minimaxi\.com|api\.minimax\.io)$/i.test(host) && /ERR_CERT_DATE_INVALID/i.test(message)) {
           try {
             console.info('[provider-http] retrying MiniMax with Node strict TLS verification')
             return await miniMaxNodeFetch(parsed, method, headers, rawBody, timeoutMs)
