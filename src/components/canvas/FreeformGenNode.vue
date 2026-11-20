@@ -220,6 +220,8 @@ const talkingBusy = ref(false)
 const talkingSpeechUrl = ref('')
 const talkingSpeechBlob = ref<Blob | null>(null)
 const talkingSpeechDuration = ref(0)
+const talkingSpeechMime = ref('audio/wav')
+const talkingSpeechText = ref('')
 function saveTalkingFile(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -236,6 +238,8 @@ async function synthesizeTalkingSpeech() {
   try {
     const output = await generateSpeech({ text: dialogue, voice: talkingTtsVoice.value })
     talkingSpeechBlob.value = output.blob
+    talkingSpeechMime.value = output.mimeType || output.blob.type || 'audio/wav'
+    talkingSpeechText.value = dialogue
     talkingSpeechDuration.value = output.duration || Math.max(1, dialogue.length / 4)
     if (talkingSpeechUrl.value) URL.revokeObjectURL(talkingSpeechUrl.value)
     talkingSpeechUrl.value = URL.createObjectURL(output.blob)
@@ -248,13 +252,14 @@ function exportTalkingSrt() {
   const dialogue = talkingDialogue.value.trim()
   if (!dialogue) { toast.warn('请先填写台词'); return }
   const parts = dialogue.match(/[^。！？!?；;，,]+[。！？!?；;，,]?/g)?.map(s => s.trim()).filter(Boolean) || [dialogue]
-  const duration = talkingSpeechDuration.value || Number(duration.value) || 5
+  const estimatedDuration = talkingSpeechText.value === dialogue ? talkingSpeechDuration.value : 0
+  const cueDuration = estimatedDuration || Number(duration.value) || 5
   const weights = parts.map(s => Math.max(1, [...s].length))
   const total = weights.reduce((sum, n) => sum + n, 0)
   let time = 0
   const cues = parts.map((part, index) => {
     const start = time
-    time = index === parts.length - 1 ? duration : time + duration * weights[index] / total
+    time = index === parts.length - 1 ? cueDuration : time + cueDuration * weights[index] / total
     return { id: index + 1, start, end: time, text: part }
   })
   saveTalkingFile(new Blob([toSRT(cues)], { type: 'text/plain;charset=utf-8' }), '角色台词.srt')
@@ -774,7 +779,7 @@ function removeSelf() {
             </select>
             <button type="button" class="opt" :disabled="talkingBusy" @click="synthesizeTalkingSpeech">{{ talkingBusy ? '配音生成中…' : '生成 AI 配音' }}</button>
             <audio v-if="talkingSpeechUrl" :src="talkingSpeechUrl" controls class="talking-player" />
-            <button v-if="talkingSpeechBlob" type="button" class="opt" @click="saveTalkingFile(talkingSpeechBlob!, '角色配音.wav')">下载配音</button>
+            <button v-if="talkingSpeechBlob" type="button" class="opt" @click="saveTalkingFile(talkingSpeechBlob!, talkingSpeechMime.includes('mpeg') ? '角色配音.mp3' : talkingSpeechMime.includes('ogg') ? '角色配音.ogg' : '角色配音.wav')">下载配音</button>
             <label class="talking-caption"><input v-model="talkingSubtitleEnabled" type="checkbox" /> 生成字幕文件（SRT）</label>
             <button v-if="talkingSubtitleEnabled" type="button" class="opt" @click="exportTalkingSrt">导出 SRT 字幕</button>
             <button type="button" class="opt" @click="applyTalkingDialogue">应用到视频提示词</button>
