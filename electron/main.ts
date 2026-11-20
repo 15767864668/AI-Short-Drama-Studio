@@ -807,6 +807,14 @@ app.whenReady().then(async () => {
       if (controller.signal.aborted) {
         throw new Error(`AutoDL 请求超时（${Math.round(timeoutMs / 1000)} 秒）`)
       }
+      const message = err instanceof Error ? err.message : String(err)
+      if (/ERR_CERT_DATE_INVALID|ERR_CERT_AUTHORITY_INVALID|ERR_CERT_COMMON_NAME_INVALID|ERR_CERT_INVALID/i.test(message)) {
+        const host = parsed.hostname
+        console.error('[provider-http] TLS certificate verification failed', { host, code: message })
+        throw new Error(
+          `HTTPS 证书校验失败（${host}）：${message}。请核对系统日期、代理/HTTPS 扫描和该域名的证书有效期。Electron 不会绕过证书校验。`
+        )
+      }
       throw err
     } finally {
       clearTimeout(timer)
