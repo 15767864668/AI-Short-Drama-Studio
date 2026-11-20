@@ -397,9 +397,17 @@ async function mediaFromValue(
     return { blob: new Blob([arr], { type: m[1] }), mimeType: m[1] }
   }
   if (/^https?:\/\//i.test(value)) {
-    const r = await fetch(value, { signal })
-    if (!r.ok) throw new Error(`下载结果失败 ${r.status}`)
+    // Generated media URLs are often signed OSS/CDN links without browser CORS headers.
+    // Use the Electron main-process transport for desktop binary downloads.
+    let r: ProxyHttpResult
+    try {
+      r = await providerHttp(value, { method: 'GET', signal, timeoutMs: 180_000 })
+    } catch (error) {
+      throw new Error(`下载生成媒体失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (!r.ok) throw new Error(`下载生成媒体失败：HTTP ${r.status}`)
     const blob = await r.blob()
+    if (!blob.size) throw new Error('下载生成媒体失败：文件为空')
     return { blob, mimeType: blob.type || fallbackMime }
   }
   if (/^[A-Za-z0-9+/=\s]+$/.test(value) && value.length > 256) {
