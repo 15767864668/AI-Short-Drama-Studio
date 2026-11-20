@@ -352,6 +352,59 @@ async function realSeedream(input: ImageGenInput): Promise<ImageGenOutput> {
   return { blob, mimeType, prompt: input.prompt }
 }
 
+/** MiniMax 官方 H3-Image：size 必须为 WIDTHxHEIGHT，不能直接发送 16:9。 */
+function isMiniMaxImageModel(model: string): boolean {
+  return /^minimax[-_]?h3[-_]?image$/i.test(model.trim())
+}
+
+function miniMaxImageSize(ar?: AspectRatio, width?: number, height?: number): string {
+  switch (ar) {
+    case '16:9': return '1360x768'
+    case '9:16': return '768x1360'
+    case '1:1': return '1024x1024'
+    case '4:3': return '1152x864'
+    case '3:4': return '864x1152'
+    case '21:9': return '1536x640'
+    default:
+      if (width && height && width > 0 && height > 0) {
+        const ratio = width / height
+        if (ratio > 1.5) return '1360x768'
+        if (ratio < 0.67) return '768x1360'
+        if (ratio > 1.15) return '1152x864'
+        if (ratio < 0.87) return '864x1152'
+      }
+      return '1024x1024'
+  }
+}
+
+async function realMiniMaxImage(input: ImageGenInput): Promise<ImageGenOutput> {
+  const { baseUrl, apiKey, model } = imageConfig(input.model)
+  if (!baseUrl || !apiKey) throw new Error('[image] MiniMax 图像 API 地址或 Key 未配置')
+  if (input.referenceImages?.length) {
+    throw new Error('[image] 当前 MiniMax H3-Image 接入仅支持文生图，请移除参考图或切换支持图生图的模型')
+  }
+  const prompt = buildPrompt(input, false)
+  const size = miniMaxImageSize(input.aspectRatio, input.width, input.height)
+  const url = `${baseUrl.replace(/\\/+$/, '')}/images/generations`
+  log(`→ MiniMax H3-Image · ${model} · ${size}`)
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({ model, prompt, size, n: input.n ?? 1 }),
+    signal: input.signal
+  })
+  if (!resp.ok) throw new Error(`[image] MiniMax 出图失败 ${resp.status} ${await resp.text()}`)
+  const data = await resp.json()
+  if (data?.base_resp?.status_code && data.base_resp.status_code !== 0) {
+    throw new Error(`[image] MiniMax 出图失败：${data.base_resp.status_msg || data.base_resp.status_code}`)
+  }
+  const result = await imageResponseToBlob(data, undefined, input.signal)
+  return { ...result, prompt: input.prompt }
+}
+
 /** 旧 gpt-image 等：文生图 */
 async function realLegacyGenerate(input: ImageGenInput): Promise<ImageGenOutput> {
   const { baseUrl, apiKey, model } = imageConfig(input.model)
@@ -528,6 +581,10 @@ export async function generateImage(
   if (getAIMode() === 'real') {
     const cfg = imageConfig(input.model)
     const adapterType = resolveImageAdapter(cfg)
+    if (isMiniMaxImageModel(cfg.model) && /minimaxi\\.com|minimax\\.chat/i.test(cfg.baseUrl || '')) {
+      onProgress?.('MiniMax H3-Image 文生图...')
+      return await realMiniMaxImage(input)
+    }
     if (adapterType === 'zealman-workflow') {
       onProgress?.('Zealman 出图...')
       return await realZealmanImage(input, onProgress)
