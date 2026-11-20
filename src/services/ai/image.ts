@@ -581,7 +581,7 @@ export async function generateImage(
   if (getAIMode() === 'real') {
     const cfg = imageConfig(input.model)
     const adapterType = resolveImageAdapter(cfg)
-    if (isMiniMaxImageModel(cfg.model) && /minimaxi\.com|minimax\.chat/i.test(cfg.baseUrl || '')) {
+    if (isMiniMaxImageModel(cfg.model)) {
       onProgress?.('MiniMax H3-Image 文生图...')
       return await realMiniMaxImage(input)
     }
