@@ -7,6 +7,8 @@ import { applyShotVideoModel, applyShotVideoProfile } from '@/services/canvas/vi
 import { isNodeRunning } from '@/services/canvas/jobs'
 import { friendlyAiError, shouldToastAiError } from '@/services/ai/abort'
 import { cssAspectRatio } from '@/services/canvas/layout'
+import { generateSpeech, TTS_VOICES } from '@/services/ai/tts'
+import { toSRT } from '@/services/ffmpeg/subtitle'
 import { openLightbox } from '@/composables/useLightbox'
 import NodeBusyOverlay from '@/components/canvas/NodeBusyOverlay.vue'
 import AssetPicker from '@/components/common/AssetPicker.vue'
@@ -212,6 +214,54 @@ function pickDuration(n: number) {
 const talkingPanelOpen = ref(false)
 const talkingDialogue = ref('')
 const talkingVoice = ref('活泼、清晰的中文声音')
+const talkingTtsVoice = ref(TTS_VOICES[0]?.id || '')
+const talkingSubtitleEnabled = ref(true)
+const talkingBusy = ref(false)
+const talkingSpeechUrl = ref('')
+const talkingSpeechBlob = ref<Blob | null>(null)
+const talkingSpeechDuration = ref(0)
+function saveTalkingFile(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 5000)
+}
+async function synthesizeTalkingSpeech() {
+  const dialogue = talkingDialogue.value.trim()
+  if (!dialogue) { toast.warn('请先填写台词'); return }
+  if (talkingBusy.value) return
+  talkingBusy.value = true
+  try {
+    const output = await generateSpeech({ text: dialogue, voice: talkingTtsVoice.value })
+    talkingSpeechBlob.value = output.blob
+    talkingSpeechDuration.value = output.duration || Math.max(1, dialogue.length / 4)
+    if (talkingSpeechUrl.value) URL.revokeObjectURL(talkingSpeechUrl.value)
+    talkingSpeechUrl.value = URL.createObjectURL(output.blob)
+    toast.success('配音已生成，可试听或下载；口型同步需要兼容的音频驱动工作流')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : String(error))
+  } finally { talkingBusy.value = false }
+}
+function exportTalkingSrt() {
+  const dialogue = talkingDialogue.value.trim()
+  if (!dialogue) { toast.warn('请先填写台词'); return }
+  const parts = dialogue.match(/[^。！？!?；;，,]+[。！？!?；;，,]?/g)?.map(s => s.trim()).filter(Boolean) || [dialogue]
+  const duration = talkingSpeechDuration.value || Number(duration.value) || 5
+  const weights = parts.map(s => Math.max(1, [...s].length))
+  const total = weights.reduce((sum, n) => sum + n, 0)
+  let time = 0
+  const cues = parts.map((part, index) => {
+    const start = time
+    time = index === parts.length - 1 ? duration : time + duration * weights[index] / total
+    return { id: index + 1, start, end: time, text: part }
+  })
+  saveTalkingFile(new Blob([toSRT(cues)], { type: 'text/plain;charset=utf-8' }), '角色台词.srt')
+  toast.success('已导出估算时间轴的 SRT 字幕；并非逐字音频识别对齐')
+}
+onBeforeUnmount(() => { if (talkingSpeechUrl.value) URL.revokeObjectURL(talkingSpeechUrl.value) })
+
 function applyTalkingDialogue() {
   const dialogue = talkingDialogue.value.trim()
   if (!dialogue) {
@@ -718,8 +768,17 @@ function removeSelf() {
           <div v-if="talkingPanelOpen" class="talking-helper-panel">
             <textarea v-model="talkingDialogue" rows="2" placeholder="输入台词，例如：大家好，我是一只会说话的小鸟！" />
             <input v-model="talkingVoice" placeholder="音色，例如：活泼、清晰的中文声音" />
+            <label class="talking-caption">配音音色</label>
+            <select v-model="talkingTtsVoice">
+              <option v-for="voice in TTS_VOICES" :key="voice.id" :value="voice.id">{{ voice.label }}</option>
+            </select>
+            <button type="button" class="opt" :disabled="talkingBusy" @click="synthesizeTalkingSpeech">{{ talkingBusy ? '配音生成中…' : '生成 AI 配音' }}</button>
+            <audio v-if="talkingSpeechUrl" :src="talkingSpeechUrl" controls class="talking-player" />
+            <button v-if="talkingSpeechBlob" type="button" class="opt" @click="saveTalkingFile(talkingSpeechBlob!, '角色配音.wav')">下载配音</button>
+            <label class="talking-caption"><input v-model="talkingSubtitleEnabled" type="checkbox" /> 生成字幕文件（SRT）</label>
+            <button v-if="talkingSubtitleEnabled" type="button" class="opt" @click="exportTalkingSrt">导出 SRT 字幕</button>
             <button type="button" class="opt" @click="applyTalkingDialogue">应用到视频提示词</button>
-            <small>此功能生成带台词的视频提示词。是否有声音及口型同步取决于所选视频模型；不等于音频驱动的精确 Lip Sync。</small>
+            <small>配音使用已配置的 TTS 接口；SRT 时间为估算值。音频驱动口型和字幕烧录尚未接入此节点，不能保证 H3 自动对口型或自动显示字幕。</small>
           </div>
         </div>
         <textarea
@@ -807,6 +866,9 @@ function removeSelf() {
 .talking-helper { display:flex; flex-direction:column; gap:8px; margin:8px 0; }
 .talking-helper-panel { display:flex; flex-direction:column; gap:8px; }
 .talking-helper-panel textarea, .talking-helper-panel input { width:100%; box-sizing:border-box; border:1px solid #454551; border-radius:8px; background:#202027; color:#f5f5f7; padding:8px; font:inherit; }
+.talking-helper-panel select { background:#202027; color:#f5f5f7; padding:8px; border:1px solid #454551; border-radius:8px; }
+.talking-player { width:100%; }
+.talking-caption { color:#b9b9c3; font-size:12px; }
 .talking-helper-panel small { color:#a9a9b5; line-height:1.5; }
 .fnode {
   position: relative;
