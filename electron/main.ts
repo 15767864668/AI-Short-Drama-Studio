@@ -749,6 +749,43 @@ app.whenReady().then(async () => {
     )
   }
 
+  // MiniMax TLS compatibility: Node and Chromium can build different trust chains.
+  // Retry only this provider's certificate-date failure with Node's strict TLS verifier.
+  // Never disable certificate validation or forward credentials to a redirected host.
+  const miniMaxNodeFetch = (target: URL, method: string, headers: Record<string, string>, body: Buffer | string | undefined, timeoutMs: number) =>
+    new Promise<{ status: number; ok: boolean; text: string; dataBase64?: string; contentType: string }>((resolve, reject) => {
+      const request = https.request(target, {
+        method,
+        headers,
+        rejectUnauthorized: true,
+        timeout: timeoutMs,
+        maxRedirects: 0
+      } as import('node:https').RequestOptions, (response) => {
+        const chunks: Buffer[] = []
+        let total = 0
+        response.on('data', (chunk: Buffer) => {
+          total += chunk.length
+          if (total > 40 * 1024 * 1024) {
+            request.destroy(new Error('MiniMax response exceeds 40 MB limit'))
+            return
+          }
+          chunks.push(chunk)
+        })
+        response.on('error', reject)
+        response.on('end', () => {
+          const bytes = Buffer.concat(chunks)
+          const contentType = String(response.headers['content-type'] || '')
+          const textual = /json|text|xml|javascript|x-www-form-urlencoded/i.test(contentType)
+          const status = response.statusCode || 0
+          resolve({ status, ok: status >= 200 && status < 300, text: textual ? bytes.toString('utf8') : '', dataBase64: textual ? undefined : bytes.toString('base64'), contentType })
+        })
+      })
+      request.on('timeout', () => request.destroy(new Error('MiniMax HTTPS request timed out')))
+      request.on('error', reject)
+      if (body !== undefined) request.write(body)
+      request.end()
+    })
+
   ipcMain.handle('desktop:autodlFetch', async (_e, opts?: {
     url?: string
     method?: string
@@ -811,6 +848,15 @@ app.whenReady().then(async () => {
       if (/ERR_CERT_DATE_INVALID|ERR_CERT_AUTHORITY_INVALID|ERR_CERT_COMMON_NAME_INVALID|ERR_CERT_INVALID/i.test(message)) {
         const host = parsed.hostname
         console.error('[provider-http] TLS certificate verification failed', { host, code: message })
+        if (parsed.protocol === 'https:' && /^(api\\.minimaxi\\.com|api\\.minimax\\.io)$/i.test(host) && /ERR_CERT_DATE_INVALID/i.test(message)) {
+          try {
+            console.info('[provider-http] retrying MiniMax with Node strict TLS verification')
+            return await miniMaxNodeFetch(parsed, method, headers, rawBody, timeoutMs)
+          } catch (fallbackError) {
+            const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+            throw new Error(`MiniMax HTTPS 校验失败：Electron: ${message}; Node HTTPS: ${fallbackMessage}。没有跳过证书校验。`)
+          }
+        }
         throw new Error(
           `HTTPS 证书校验失败（${host}）：${message}。请核对系统日期、代理/HTTPS 扫描和该域名的证书有效期。Electron 不会绕过证书校验。`
         )
