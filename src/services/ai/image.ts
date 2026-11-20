@@ -157,12 +157,22 @@ async function imageResponseToBlob(
 
   // 情况 2：url
   if (item.url) {
-    const r = await fetch(item.url, {
-      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
-      signal
-    })
-    if (!r.ok) throw new Error(`下载图片失败：${r.status}`)
+    // Signed image URLs are often hosted on a different CDN without CORS headers.
+    // Desktop requests must use the existing Electron transport for downloads too.
+    let r: Awaited<ReturnType<typeof providerHttp>>
+    try {
+      r = await providerHttp(String(item.url), {
+        method: 'GET',
+        headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
+        signal,
+        timeoutMs: 120_000
+      })
+    } catch (error) {
+      throw new Error(`下载图片网络失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (!r.ok) throw new Error(`下载图片失败：HTTP ${r.status}`)
     const blob = await r.blob()
+    if (!blob.size) throw new Error('下载图片失败：返回内容为空')
     return { blob, mimeType: blob.type || 'image/jpeg' }
   }
 
