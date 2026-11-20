@@ -385,7 +385,7 @@ async function realMiniMaxImage(input: ImageGenInput): Promise<ImageGenOutput> {
   }
   const prompt = buildPrompt(input, false)
   const size = miniMaxImageSize(input.aspectRatio, input.width, input.height)
-  const url = `${baseUrl.replace(/\\/+$/, '')}/images/generations`
+  const url = `${baseUrl.replace(/\/+$/, '')}/images/generations`
   log(`→ MiniMax H3-Image · ${model} · ${size}`)
   const resp = await fetch(url, {
     method: 'POST',
@@ -581,7 +581,7 @@ export async function generateImage(
   if (getAIMode() === 'real') {
     const cfg = imageConfig(input.model)
     const adapterType = resolveImageAdapter(cfg)
-    if (isMiniMaxImageModel(cfg.model) && /minimaxi\\.com|minimax\\.chat/i.test(cfg.baseUrl || '')) {
+    if (isMiniMaxImageModel(cfg.model) && /minimaxi\.com|minimax\.chat/i.test(cfg.baseUrl || '')) {
       onProgress?.('MiniMax H3-Image 文生图...')
       return await realMiniMaxImage(input)
     }
