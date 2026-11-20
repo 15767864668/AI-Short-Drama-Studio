@@ -37,7 +37,7 @@ function run(fn: () => void) {
   <header v-if="show" class="titlebar win-titlebar">
     <div v-if="route.name !== 'home'" class="brand">
       <img class="mark" src="/logo.png" alt="" />
-      <span class="name">剧流 Studio</span>
+      <span class="name">Hello Simple</span>
     </div>
     <div class="controls">
       <button type="button" class="ctrl" title="最小化" @click="run(() => desktop().minimize())">
