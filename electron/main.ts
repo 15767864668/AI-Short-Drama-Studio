@@ -845,21 +845,22 @@ app.whenReady().then(async () => {
         throw new Error(`AutoDL 请求超时（${Math.round(timeoutMs / 1000)} 秒）`)
       }
       const message = err instanceof Error ? err.message : String(err)
-      if (/ERR_CERT_DATE_INVALID|ERR_CERT_AUTHORITY_INVALID|ERR_CERT_COMMON_NAME_INVALID|ERR_CERT_INVALID/i.test(message)) {
-        const host = parsed.hostname
-        console.error('[provider-http] TLS certificate verification failed', { host, code: message })
-        if (parsed.protocol === 'https:' && /^(api\.minimaxi\.com|api\.minimax\.io)$/i.test(host) && /ERR_CERT_DATE_INVALID/i.test(message)) {
-          try {
-            console.info('[provider-http] retrying MiniMax with Node strict TLS verification')
-            return await miniMaxNodeFetch(parsed, method, headers, rawBody, timeoutMs)
-          } catch (fallbackError) {
-            const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
-            throw new Error(`MiniMax HTTPS 校验失败：Electron: ${message}; Node HTTPS: ${fallbackMessage}。没有跳过证书校验。`)
-          }
+      const isMiniMax = parsed.protocol === 'https:' && /^(api\.minimaxi\.com|api\.minimax\.io)$/i.test(parsed.hostname)
+      const retryableTransportError = /ERR_CERT_DATE_INVALID|ERR_CONNECTION_CLOSED|ERR_CONNECTION_RESET|ERR_EMPTY_RESPONSE|ERR_SSL_PROTOCOL_ERROR/i.test(message)
+      if (isMiniMax && retryableTransportError) {
+        // Retry only transport failures, never HTTP errors or API errors.
+        // Node HTTPS continues to validate the certificate chain and hostname.
+        console.warn('[provider-http] Electron transport failed, retrying MiniMax with strict Node HTTPS', { host: parsed.hostname, error: message })
+        try {
+          return await miniMaxNodeFetch(parsed, method, headers, rawBody, timeoutMs)
+        } catch (fallbackError) {
+          const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+          throw new Error(`MiniMax 网络连接失败：Electron: ${message}; Node HTTPS: ${fallbackMessage}。请检查网络代理或 TLS 连接，证书验证未关闭。`)
         }
-        throw new Error(
-          `HTTPS 证书校验失败（${host}）：${message}。请核对系统日期、代理/HTTPS 扫描和该域名的证书有效期。Electron 不会绕过证书校验。`
-        )
+      }
+      if (/ERR_CERT_DATE_INVALID|ERR_CERT_AUTHORITY_INVALID|ERR_CERT_COMMON_NAME_INVALID|ERR_CERT_INVALID/i.test(message)) {
+        console.error('[provider-http] TLS certificate verification failed', { host: parsed.hostname, code: message })
+        throw new Error(`HTTPS 证书校验失败（${parsed.hostname}）：${message}。请检查证书有效期及代理 HTTPS 扫描，未跳过证书校验。`)
       }
       throw err
     } finally {
